@@ -1,15 +1,14 @@
-package parser
+package utils
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/malsuke/seccamp2026-tls13-cli/internal/messages/record"
 	"github.com/malsuke/seccamp2026-tls13-cli/internal/protocol"
 )
 
-const (
-	handshakeSplitFirstPart = 10
-)
+const handshakeSplitFirstPart = 10
 
 func TestParseServerHelloFromBytes(t *testing.T) {
 	serverHelloMessage := buildServerHelloHandshakeMessage()
@@ -19,9 +18,9 @@ func TestParseServerHelloFromBytes(t *testing.T) {
 		t.Fatalf("NewTLSPlaintext(rec1) failed: %v", err)
 	}
 
-	alertRecord, err := record.NewTLSPlaintext(protocol.Alert, []byte{0x02, 0x00})
+	changeCipherSpecRecord, err := record.NewTLSPlaintext(protocol.ChangeCipherSpec, []byte{0x01})
 	if err != nil {
-		t.Fatalf("NewTLSPlaintext(alert) failed: %v", err)
+		t.Fatalf("NewTLSPlaintext(changeCipherSpec) failed: %v", err)
 	}
 
 	rec2, err := record.NewTLSPlaintext(protocol.Handshake, serverHelloMessage[handshakeSplitFirstPart:])
@@ -30,16 +29,19 @@ func TestParseServerHelloFromBytes(t *testing.T) {
 	}
 
 	raw := append([]byte{}, rec1.Marshal()...)
-	raw = append(raw, alertRecord.Marshal()...)
+	raw = append(raw, changeCipherSpecRecord.Marshal()...)
 	raw = append(raw, rec2.Marshal()...)
 
-	serverHello, records, err := ParseServerHelloFromBytes(raw)
+	serverHello, plaintextRecords, ciphertextRecords, err := ParseServerHelloFromBytes(raw)
 	if err != nil {
 		t.Fatalf("ParseServerHelloFromBytes() failed: %v", err)
 	}
 
-	if len(records) != 3 {
-		t.Fatalf("len(records) = %d, want 3", len(records))
+	if len(plaintextRecords) != 3 {
+		t.Fatalf("len(plaintextRecords) = %d, want 3", len(plaintextRecords))
+	}
+	if len(ciphertextRecords) != 0 {
+		t.Fatalf("len(ciphertextRecords) = %d, want 0", len(ciphertextRecords))
 	}
 
 	if serverHello.CipherSuite != protocol.TLS_AES_128_GCM_SHA256 {
@@ -55,7 +57,7 @@ func TestParseServerHelloFromBytes(t *testing.T) {
 	}
 }
 
-func TestCollectHandshakeMessages_IncompleteHeader(t *testing.T) {
+func TestCollectHandshakeMessagesIncompleteHeader(t *testing.T) {
 	rec, err := record.NewTLSPlaintext(protocol.Handshake, []byte{byte(protocol.TypeServerHello), 0x00, 0x00})
 	if err != nil {
 		t.Fatalf("NewTLSPlaintext() failed: %v", err)
@@ -67,23 +69,23 @@ func TestCollectHandshakeMessages_IncompleteHeader(t *testing.T) {
 	}
 }
 
-func TestCountRecordTypes(t *testing.T) {
-	handshakeRecord, err := record.NewTLSPlaintext(protocol.Handshake, []byte{0x01, 0x00, 0x00, 0x00})
-	if err != nil {
-		t.Fatalf("NewTLSPlaintext(handshake) failed: %v", err)
-	}
-
-	alertRecord, err := record.NewTLSPlaintext(protocol.Alert, []byte{0x02, 0x00})
+func TestParseRecordsAlertReturnsError(t *testing.T) {
+	alertRecord, err := record.NewTLSPlaintext(protocol.Alert, []byte{0x02, byte(protocol.AlertHandshakeFailure)})
 	if err != nil {
 		t.Fatalf("NewTLSPlaintext(alert) failed: %v", err)
 	}
 
-	counts := CountRecordTypes([]record.TLSPlaintext{*handshakeRecord, *alertRecord, *handshakeRecord})
-	if counts[protocol.Handshake] != 2 {
-		t.Fatalf("handshake count = %d, want 2", counts[protocol.Handshake])
+	_, _, err = ParseRecords(alertRecord.Marshal())
+	if err == nil {
+		t.Fatal("ParseRecords() should fail when alert record is present")
 	}
-	if counts[protocol.Alert] != 1 {
-		t.Fatalf("alert count = %d, want 1", counts[protocol.Alert])
+
+	var alertErr *AlertRecordError
+	if !errors.As(err, &alertErr) {
+		t.Fatalf("ParseRecords() error = %v, want AlertRecordError", err)
+	}
+	if alertErr.Description != protocol.AlertHandshakeFailure {
+		t.Fatalf("alert description = %v, want %v", alertErr.Description, protocol.AlertHandshakeFailure)
 	}
 }
 

@@ -2,6 +2,7 @@ package record
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/malsuke/seccamp2026-tls13-cli/internal/protocol"
 	"golang.org/x/crypto/cryptobyte"
@@ -173,4 +174,66 @@ func ParseTLSPlaintextHeader(data []byte) (*TLSPlaintext, error) {
 		Version: protocol.TLSVersion(version),
 		Length:  length,
 	}, nil
+}
+
+func ParseTLSPlaintextRecords(data []byte) ([]TLSPlaintext, error) {
+	records, remain, err := ParseTLSPlaintextRecordsWithRemainder(data)
+	if err != nil {
+		return nil, err
+	}
+	if len(remain) > 0 {
+		return nil, fmt.Errorf("tls: incomplete record fragment: %d bytes", len(remain))
+	}
+	return records, nil
+}
+
+func ParseTLSPlaintextRecordsWithRemainder(data []byte) ([]TLSPlaintext, []byte, error) {
+	if len(data) == 0 {
+		return nil, nil, ErrDataTooShort
+	}
+
+	records := make([]TLSPlaintext, 0)
+	offset := 0
+
+	for {
+		remaining := len(data) - offset
+		if remaining == 0 {
+			return records, nil, nil
+		}
+
+		if remaining < protocol.RecordHeaderLen {
+			rest := append([]byte(nil), data[offset:]...)
+			return records, rest, nil
+		}
+
+		hdr, err := ParseTLSPlaintextHeader(data[offset : offset+protocol.RecordHeaderLen])
+		if err != nil {
+			return nil, nil, fmt.Errorf("tls: failed to parse record header at offset %d: %w", offset, err)
+		}
+
+		recordLen := protocol.RecordHeaderLen + int(hdr.Length)
+		if remaining < recordLen {
+			rest := append([]byte(nil), data[offset:]...)
+			return records, rest, nil
+		}
+
+		rec, err := ParseTLSPlaintext(data[offset : offset+recordLen])
+		if err != nil {
+			return nil, nil, fmt.Errorf("tls: failed to parse record at offset %d: %w", offset, err)
+		}
+
+		records = append(records, *rec)
+		offset += recordLen
+	}
+}
+
+func ParseTLSCiphertextRecords(data []byte) ([]TLSCiphertext, error) {
+	plaintextRecords, err := ParseTLSPlaintextRecords(data)
+	if err != nil {
+		return nil, err
+	}
+
+	ciphertextRecords := make([]TLSCiphertext, len(plaintextRecords))
+	copy(ciphertextRecords, plaintextRecords)
+	return ciphertextRecords, nil
 }

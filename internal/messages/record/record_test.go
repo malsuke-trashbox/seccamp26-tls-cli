@@ -212,3 +212,87 @@ func TestTLSInnerPlaintextRoundTrip(t *testing.T) {
 		t.Fatalf("Padding = %v, want %v", parsed.Padding, []byte{0x00, 0x00})
 	}
 }
+
+func TestParseTLSPlaintextRecords(t *testing.T) {
+	rec1, err := NewTLSPlaintext(protocol.Handshake, []byte{0x01, 0x00, 0x00, 0x00})
+	if err != nil {
+		t.Fatalf("NewTLSPlaintext(rec1) failed: %v", err)
+	}
+	rec2, err := NewTLSPlaintext(protocol.Alert, []byte{0x02, 0x00})
+	if err != nil {
+		t.Fatalf("NewTLSPlaintext(rec2) failed: %v", err)
+	}
+
+	raw := append([]byte{}, rec1.Marshal()...)
+	raw = append(raw, rec2.Marshal()...)
+
+	records, err := ParseTLSPlaintextRecords(raw)
+	if err != nil {
+		t.Fatalf("ParseTLSPlaintextRecords() failed: %v", err)
+	}
+
+	if len(records) != 2 {
+		t.Fatalf("len(records) = %d, want 2", len(records))
+	}
+	if records[0].Type != protocol.Handshake {
+		t.Fatalf("records[0].Type = %v, want %v", records[0].Type, protocol.Handshake)
+	}
+	if records[1].Type != protocol.Alert {
+		t.Fatalf("records[1].Type = %v, want %v", records[1].Type, protocol.Alert)
+	}
+}
+
+func TestParseTLSPlaintextRecordsWithRemainder(t *testing.T) {
+	rec, err := NewTLSPlaintext(protocol.Handshake, []byte{0x01, 0x00, 0x00, 0x00})
+	if err != nil {
+		t.Fatalf("NewTLSPlaintext() failed: %v", err)
+	}
+
+	raw := append([]byte{}, rec.Marshal()...)
+	raw = append(raw, rec.Marshal()...)
+	raw = raw[:len(raw)-2]
+
+	records, remain, err := ParseTLSPlaintextRecordsWithRemainder(raw)
+	if err != nil {
+		t.Fatalf("ParseTLSPlaintextRecordsWithRemainder() failed: %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("len(records) = %d, want 1", len(records))
+	}
+	if len(remain) != len(rec.Marshal())-2 {
+		t.Fatalf("len(remain) = %d, want %d", len(remain), len(rec.Marshal())-2)
+	}
+}
+
+func TestParseTLSPlaintextRecords_IncompleteFails(t *testing.T) {
+	rec, err := NewTLSPlaintext(protocol.Handshake, []byte{0x01, 0x00, 0x00, 0x00})
+	if err != nil {
+		t.Fatalf("NewTLSPlaintext() failed: %v", err)
+	}
+
+	raw := rec.Marshal()
+	raw = raw[:len(raw)-1]
+
+	_, err = ParseTLSPlaintextRecords(raw)
+	if err == nil {
+		t.Fatal("ParseTLSPlaintextRecords() should fail on incomplete record")
+	}
+}
+
+func TestParseTLSCiphertextRecords(t *testing.T) {
+	rec, err := NewTLSPlaintext(protocol.ApplicationData, []byte{0xaa, 0xbb})
+	if err != nil {
+		t.Fatalf("NewTLSPlaintext() failed: %v", err)
+	}
+
+	records, err := ParseTLSCiphertextRecords(rec.Marshal())
+	if err != nil {
+		t.Fatalf("ParseTLSCiphertextRecords() failed: %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("len(records) = %d, want 1", len(records))
+	}
+	if records[0].Type != protocol.ApplicationData {
+		t.Fatalf("records[0].Type = %v, want %v", records[0].Type, protocol.ApplicationData)
+	}
+}
