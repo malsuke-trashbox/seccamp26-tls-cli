@@ -9,32 +9,24 @@ import (
 	"github.com/malsuke/seccamp2026-tls13-cli/internal/protocol"
 )
 
-func DeriveTLS13ChaCha20ClientSessionKeysFromServerFlight(
+func DeriveTLS13SharedSecretAndServerHelloMessage(
 	privateKey *ecdh.PrivateKey,
-	clientHelloPayload []byte,
 	plaintextRecords []record.TLSPlaintext,
-	ciphertextRecords []record.TLSCiphertext,
-) (*key.TLS13ChaCha20ClientSessionKeys, error) {
-	sharedSecret, serverHelloMessage, err := deriveSharedSecretAndServerHelloMessage(privateKey, plaintextRecords)
-	if err != nil {
-		return nil, err
-	}
+) ([]byte, []byte, error) {
+	return deriveSharedSecretAndServerHelloMessage(privateKey, plaintextRecords)
+}
 
-	serverEncryptedHandshakeMessages, err := deriveServerEncryptedHandshakeMessages(
+func DeriveTLS13ServerEncryptedHandshakeMessages(
+	ciphertextRecords []record.TLSCiphertext,
+	sharedSecret []byte,
+	clientHelloPayload []byte,
+	serverHelloMessage []byte,
+) ([]byte, error) {
+	return deriveServerEncryptedHandshakeMessages(
 		ciphertextRecords,
 		sharedSecret,
 		clientHelloPayload,
 		serverHelloMessage,
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	return key.DeriveTLS13ChaCha20ClientSessionKeys(
-		sharedSecret,
-		clientHelloPayload,
-		serverHelloMessage,
-		serverEncryptedHandshakeMessages,
 	)
 }
 

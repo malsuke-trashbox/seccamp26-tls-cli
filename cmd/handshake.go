@@ -56,17 +56,16 @@ func do_handshake(conn net.Conn) error {
 		panic(err)
 	}
 
-	sessionKeys, err := utils.DeriveTLS13ChaCha20ClientSessionKeysFromServerFlight(
-		privateKey,
-		clientHelloRecord.Payload,
-		plaintextRecords,
-		ciphertextRecords,
-	)
-	if err != nil {
-		panic(err)
-	}
+	// step5: ServerHelloへパース
 
-	finishedRecord, err := utils.BuildClientFinishedRecord(sessionKeys, 0)
+	// step6: 共通鍵を導出する
+
+	// step7: サーバからの暗号化されたハンドシェイクメッセージを復号する
+
+	// step8: 復号したハンドシェイクメッセージから、ServerFinishedを検出する
+
+	// step9: ClientFinished レコードを生成し、サーバに送信する
+	finishedRecord, err := utils.BuildClientFinishedRecord(&keyState, 0)
 	if err != nil {
 		panic(err)
 	}
