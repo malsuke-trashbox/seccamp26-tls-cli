@@ -7,7 +7,6 @@ import (
 	"fmt"
 
 	"github.com/malsuke/seccamp2026-tls13-cli/internal/messages/record"
-	"github.com/malsuke/seccamp2026-tls13-cli/internal/messages/record/alert"
 	"github.com/malsuke/seccamp2026-tls13-cli/internal/messages/record/handshake"
 	"github.com/malsuke/seccamp2026-tls13-cli/internal/protocol"
 	"golang.org/x/crypto/chacha20poly1305"
@@ -15,15 +14,6 @@ import (
 
 var ErrServerHelloNotFound = errors.New("tls: server hello not found in records")
 var ErrNilAEAD = errors.New("tls: aead is nil")
-
-type AlertRecordError struct {
-	Level       protocol.AlertLevel
-	Description protocol.AlertDescription
-}
-
-func (e *AlertRecordError) Error() string {
-	return fmt.Sprintf("tls: received alert: level=%d description=%s", uint8(e.Level), e.Description.String())
-}
 
 func GenerateRandom32Bytes() [32]byte {
 	var random [32]byte
@@ -41,11 +31,6 @@ func ParseRecords(data []byte) ([]record.TLSPlaintext, []record.TLSCiphertext, e
 	ciphertextRecords := make([]record.TLSCiphertext, 0, len(allRecords))
 
 	for _, rec := range allRecords {
-		if rec.Type == protocol.Alert {
-			alertErr := parseAlertRecordError(rec)
-			return nil, nil, alertErr
-		}
-
 		if rec.Type == protocol.ApplicationData {
 			ciphertextRecords = append(ciphertextRecords, rec)
 			continue
@@ -146,10 +131,6 @@ func DecodeTLSCiphertextRecordsWithAEAD(ciphertextRecords []record.TLSCiphertext
 			Version: rec.Version,
 			Length:  uint16(len(content)),
 			Payload: content,
-		}
-
-		if plainRec.Type == protocol.Alert {
-			return nil, parseAlertRecordError(plainRec)
 		}
 
 		plaintextRecords = append(plaintextRecords, plainRec)
@@ -303,18 +284,6 @@ func FindFirstHandshakeMessage(messages [][]byte, typ protocol.HandshakeType) ([
 	}
 
 	return nil, false
-}
-
-func parseAlertRecordError(rec record.TLSPlaintext) error {
-	alertMessage := &alert.Alert{}
-	if err := alertMessage.Unmarshal(rec.Payload); err != nil {
-		return fmt.Errorf("tls: received malformed alert record: %w", err)
-	}
-
-	return &AlertRecordError{
-		Level:       alertMessage.Level,
-		Description: alertMessage.Description,
-	}
 }
 
 func parseUint24(data []byte) int {

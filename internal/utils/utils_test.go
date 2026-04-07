@@ -1,7 +1,6 @@
 package utils
 
 import (
-	"errors"
 	"testing"
 
 	"github.com/malsuke/seccamp2026-tls13-cli/internal/messages/record"
@@ -69,23 +68,25 @@ func TestCollectHandshakeMessagesIncompleteHeader(t *testing.T) {
 	}
 }
 
-func TestParseRecordsAlertReturnsError(t *testing.T) {
+func TestParseRecordsIncludesAlertInPlaintext(t *testing.T) {
 	alertRecord, err := record.NewTLSPlaintext(protocol.Alert, []byte{0x02, byte(protocol.AlertHandshakeFailure)})
 	if err != nil {
 		t.Fatalf("NewTLSPlaintext(alert) failed: %v", err)
 	}
 
-	_, _, err = ParseRecords(alertRecord.Marshal())
-	if err == nil {
-		t.Fatal("ParseRecords() should fail when alert record is present")
+	plaintextRecords, ciphertextRecords, err := ParseRecords(alertRecord.Marshal())
+	if err != nil {
+		t.Fatalf("ParseRecords() failed: %v", err)
 	}
 
-	var alertErr *AlertRecordError
-	if !errors.As(err, &alertErr) {
-		t.Fatalf("ParseRecords() error = %v, want AlertRecordError", err)
+	if len(plaintextRecords) != 1 {
+		t.Fatalf("len(plaintextRecords) = %d, want 1", len(plaintextRecords))
 	}
-	if alertErr.Description != protocol.AlertHandshakeFailure {
-		t.Fatalf("alert description = %v, want %v", alertErr.Description, protocol.AlertHandshakeFailure)
+	if len(ciphertextRecords) != 0 {
+		t.Fatalf("len(ciphertextRecords) = %d, want 0", len(ciphertextRecords))
+	}
+	if plaintextRecords[0].Type != protocol.Alert {
+		t.Fatalf("plaintextRecords[0].Type = %v, want %v", plaintextRecords[0].Type, protocol.Alert)
 	}
 }
 

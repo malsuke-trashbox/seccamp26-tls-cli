@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"net"
 	"os"
 
@@ -13,6 +14,8 @@ import (
 
 const defaultServerName = "www.example.com"
 
+var errAlertRecordReceived = errors.New("tls: alert record received")
+
 func main() {
 	tcp, err := (&net.Dialer{}).Dial("tcp", defaultServerName+":443")
 	if err != nil {
@@ -21,23 +24,13 @@ func main() {
 	defer tcp.Close()
 
 	privateKey, publicKey, err := key.GenerateX25519KeyPair()
-	if err != nil {
-		panic(err)
-	}
-
 	clientHelloRecord, err := NewClientHelloRecord(publicKey)
-	if err != nil {
-		panic(err)
-	}
-
-	if _, err := tcp.Write(clientHelloRecord.Marshal()); err != nil {
-		panic(err)
-	}
+	tcp.Write(clientHelloRecord.Marshal())
 
 	var buf [4096]byte
 	n, err := tcp.Read(buf[:])
-	if err != nil {
-		panic(err)
+	if err != nil || n > 0 && protocol.ContentType(buf[0]) == protocol.Alert {
+		panic(errAlertRecordReceived)
 	}
 
 	plaintextRecords, ciphertextRecords, err := utils.ParseRecords(buf[:n])
@@ -105,37 +98,45 @@ func main() {
 		panic(err)
 	}
 
-	finishedRecord, err := utils.EncryptTLS13Record(
+	finishedInnerPlaintext := utils.BuildTLSInnerPlaintext(protocol.Handshake, finishedHandshake.Marshal())
+	finishedRecord := utils.NewTLS13ApplicationDataCiphertextRecordForInnerPlaintext(finishedInnerPlaintext)
+	finishedPayload, err := utils.EncryptTLS13RecordPayload(
 		sessionKeys.ClientHandshakeKey,
 		sessionKeys.ClientHandshakeIV,
 		0,
-		protocol.Handshake,
-		finishedHandshake.Marshal(),
+		finishedRecord.Header(),
+		finishedInnerPlaintext,
 	)
 	if err != nil {
 		panic(err)
 	}
+	finishedRecord.Payload = finishedPayload
+	finishedRecord.Length = uint16(len(finishedPayload))
 	if _, err := tcp.Write(finishedRecord.Marshal()); err != nil {
 		panic(err)
 	}
 
 	httpRequest := []byte("GET / HTTP/1.1\r\nHost: " + defaultServerName + "\r\nConnection: close\r\n\r\n")
 	applicationData := (&appdata.ApplicationData{Data: httpRequest}).Marshal()
-	applicationDataRecord, err := utils.EncryptTLS13Record(
+	applicationDataInnerPlaintext := utils.BuildTLSInnerPlaintext(protocol.ApplicationData, applicationData)
+	applicationDataRecord := utils.NewTLS13ApplicationDataCiphertextRecordForInnerPlaintext(applicationDataInnerPlaintext)
+	applicationDataPayload, err := utils.EncryptTLS13RecordPayload(
 		sessionKeys.ClientApplicationKey,
 		sessionKeys.ClientApplicationIV,
 		0,
-		protocol.ApplicationData,
-		applicationData,
+		applicationDataRecord.Header(),
+		applicationDataInnerPlaintext,
 	)
 	if err != nil {
 		panic(err)
 	}
+	applicationDataRecord.Payload = applicationDataPayload
+	applicationDataRecord.Length = uint16(len(applicationDataPayload))
 	if _, err := tcp.Write(applicationDataRecord.Marshal()); err != nil {
 		panic(err)
 	}
 
-	responseApplicationData, err := utils.ReadServerApplicationData(tcp, sessionKeys.ServerApplicationKey, sessionKeys.ServerApplicationIV)
+	responseApplicationData, _, err := utils.ReadServerApplicationData(tcp, sessionKeys.ServerApplicationKey, sessionKeys.ServerApplicationIV)
 	if err != nil {
 		panic(err)
 	}

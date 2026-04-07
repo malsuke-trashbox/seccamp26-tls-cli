@@ -53,12 +53,15 @@ func TestDecodeTLSCiphertextRecordsWithAEADAlert(t *testing.T) {
 		protocol.Alert,
 	)
 
-	_, err = DecodeTLSCiphertextRecordsWithAEAD([]record.TLSCiphertext{rec}, aead, iv, 0)
-	if err == nil {
-		t.Fatal("DecodeTLSCiphertextRecordsWithAEAD() should fail on alert")
+	plaintextRecords, err := DecodeTLSCiphertextRecordsWithAEAD([]record.TLSCiphertext{rec}, aead, iv, 0)
+	if err != nil {
+		t.Fatalf("DecodeTLSCiphertextRecordsWithAEAD() failed: %v", err)
 	}
-	if _, ok := err.(*AlertRecordError); !ok {
-		t.Fatalf("error = %T, want *AlertRecordError", err)
+	if len(plaintextRecords) != 1 {
+		t.Fatalf("len(plaintextRecords) = %d, want 1", len(plaintextRecords))
+	}
+	if plaintextRecords[0].Type != protocol.Alert {
+		t.Fatalf("plaintextRecords[0].Type = %v, want %v", plaintextRecords[0].Type, protocol.Alert)
 	}
 }
 

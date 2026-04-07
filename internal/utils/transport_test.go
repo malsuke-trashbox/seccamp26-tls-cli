@@ -45,12 +45,18 @@ func TestReadServerApplicationData_CloseNotifyAfterData(t *testing.T) {
 		writeErrCh <- nil
 	}()
 
-	got, err := ReadServerApplicationData(clientConn, key, iv)
+	got, decodedRecords, err := ReadServerApplicationData(clientConn, key, iv)
 	if err != nil {
 		t.Fatalf("ReadServerApplicationData() failed: %v", err)
 	}
 	if !bytes.Equal(got, []byte("hello")) {
 		t.Fatalf("got=%q, want=%q", got, []byte("hello"))
+	}
+	if len(decodedRecords) != 2 {
+		t.Fatalf("len(decodedRecords) = %d, want 2", len(decodedRecords))
+	}
+	if decodedRecords[1].Type != protocol.Alert {
+		t.Fatalf("decodedRecords[1].Type = %v, want %v", decodedRecords[1].Type, protocol.Alert)
 	}
 
 	if writeErr := <-writeErrCh; writeErr != nil {
@@ -82,12 +88,18 @@ func TestReadServerApplicationData_OnlyCloseNotify(t *testing.T) {
 		writeErrCh <- nil
 	}()
 
-	got, err := ReadServerApplicationData(clientConn, key, iv)
+	got, decodedRecords, err := ReadServerApplicationData(clientConn, key, iv)
 	if err != nil {
 		t.Fatalf("ReadServerApplicationData() failed: %v", err)
 	}
-	if got != nil {
-		t.Fatalf("got=%v, want=nil", got)
+	if len(got) != 0 {
+		t.Fatalf("len(got) = %d, want 0", len(got))
+	}
+	if len(decodedRecords) != 1 {
+		t.Fatalf("len(decodedRecords) = %d, want 1", len(decodedRecords))
+	}
+	if decodedRecords[0].Type != protocol.Alert {
+		t.Fatalf("decodedRecords[0].Type = %v, want %v", decodedRecords[0].Type, protocol.Alert)
 	}
 
 	if writeErr := <-writeErrCh; writeErr != nil {
