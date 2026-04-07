@@ -139,7 +139,7 @@ func DecodeTLSCiphertextRecordsWithAEAD(ciphertextRecords []record.TLSCiphertext
 	return plaintextRecords, nil
 }
 
-func DecodeTLSCiphertextRecordsWithChaCha20Poly1305(ciphertextRecords []record.TLSCiphertext, key []byte, iv []byte, initialSeq uint64) ([]record.TLSPlaintext, error) {
+func DecodeTLSCiphertextRecordsWithChaCha20Poly1305Raw(ciphertextRecords []record.TLSCiphertext, key []byte, iv []byte, initialSeq uint64) ([]record.TLSPlaintext, error) {
 	if len(key) != chacha20poly1305.KeySize {
 		return nil, fmt.Errorf("tls: invalid chacha20-poly1305 key length: %d", len(key))
 	}
@@ -150,6 +150,20 @@ func DecodeTLSCiphertextRecordsWithChaCha20Poly1305(ciphertextRecords []record.T
 	}
 
 	return DecodeTLSCiphertextRecordsWithAEAD(ciphertextRecords, aead, iv, initialSeq)
+}
+
+func DecodeTLSCiphertextRecordsWithChaCha20Poly1305(ciphertextRecords []record.TLSCiphertext, key []byte, iv []byte, initialSeq uint64) (*handshake.EncryptedExtensions, *handshake.Certificate, *handshake.CertificateVerify, *handshake.Finished, []record.TLSPlaintext, error) {
+	plaintextRecords, err := DecodeTLSCiphertextRecordsWithChaCha20Poly1305Raw(ciphertextRecords, key, iv, initialSeq)
+	if err != nil {
+		return nil, nil, nil, nil, nil, err
+	}
+
+	encryptedExtensions, certificate, certificateVerify, finished, err := ParseServerTLS13HandshakeMessages(plaintextRecords)
+	if err != nil {
+		return nil, nil, nil, nil, plaintextRecords, err
+	}
+
+	return encryptedExtensions, certificate, certificateVerify, finished, plaintextRecords, nil
 }
 
 func ParseServerTLS13HandshakeMessages(records []record.TLSPlaintext) (*handshake.EncryptedExtensions, *handshake.Certificate, *handshake.CertificateVerify, *handshake.Finished, error) {

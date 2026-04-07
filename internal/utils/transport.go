@@ -108,7 +108,7 @@ func DecodeTLSCiphertextRecordsWithChaCha20Poly1305AndNextSeq(ciphertextRecords 
 	decodedRecords := make([]record.TLSPlaintext, 0, len(ciphertextRecords))
 
 	for _, ciphertextRecord := range ciphertextRecords {
-		plaintextRecords, decodeErr := DecodeTLSCiphertextRecordsWithChaCha20Poly1305(
+		plaintextRecords, decodeErr := DecodeTLSCiphertextRecordsWithChaCha20Poly1305Raw(
 			[]record.TLSCiphertext{ciphertextRecord},
 			key,
 			iv,

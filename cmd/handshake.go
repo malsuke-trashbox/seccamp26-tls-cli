@@ -18,7 +18,6 @@ func do_handshake(conn net.Conn) error {
 	 * step1: 鍵交換で利用する共通鍵と秘密鍵を生成する
 	 * key.GenerateX25519KeyPair() を使う
 	 */
-
 	privateKey, publicKey, err := key.GenerateX25519KeyPair()
 	if err != nil {
 		panic(err)
@@ -57,12 +56,48 @@ func do_handshake(conn net.Conn) error {
 	}
 
 	// step5: ServerHelloへパース
+	serverHello, serverHelloMessage, err := utils.ParseTLS13ServerHelloAndMessage(plaintextRecords)
+	if err != nil {
+		panic(err)
+	}
 
 	// step6: 共通鍵を導出する
+	sharedSecret, err := utils.DeriveTLS13SharedSecretFromServerHello(privateKey, serverHello)
+	if err != nil {
+		panic(err)
+	}
 
 	// step7: サーバからの暗号化されたハンドシェイクメッセージを復号する
+	handshakeSecrets, err := key.DeriveTLS13ChaCha20HandshakeSecrets(sharedSecret, clientHelloRecord.Payload, serverHelloMessage)
+	if err != nil {
+		panic(err)
+	}
 
-	// step8: 復号したハンドシェイクメッセージから、ServerFinishedを検出する
+	_, _, _, _, decryptedServerHandshakeRecords, err := utils.DecodeTLSCiphertextRecordsWithChaCha20Poly1305(
+		ciphertextRecords,
+		handshakeSecrets.ServerHandshakeKey,
+		handshakeSecrets.ServerHandshakeIV,
+		0,
+	)
+	if err != nil {
+		panic(err)
+	}
+
+	serverEncryptedHandshakeMessages, err := utils.ConcatHandshakeMessages(decryptedServerHandshakeRecords)
+	if err != nil {
+		panic(err)
+	}
+
+	sessionKeys, err := key.DeriveTLS13ChaCha20ClientSessionKeys(
+		sharedSecret,
+		clientHelloRecord.Payload,
+		serverHelloMessage,
+		serverEncryptedHandshakeMessages,
+	)
+	if err != nil {
+		panic(err)
+	}
+	keyState = *sessionKeys
 
 	// step9: ClientFinished レコードを生成し、サーバに送信する
 	finishedRecord, err := utils.BuildClientFinishedRecord(&keyState, 0)
