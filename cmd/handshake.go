@@ -37,6 +37,7 @@ func do_handshake(conn net.Conn) error {
 
 	/**
 	 * step3: バイト列を読み取る
+	 * アラートが来た場合はエラーにして終了
 	 */
 	var buf [4096]byte
 	n, err := conn.Read(buf[:])
@@ -48,14 +49,18 @@ func do_handshake(conn net.Conn) error {
 	}
 
 	/**
-	 * step4: バイト列をTLSレコードにパースする
+	 * step4: 受け取ったバイト列をTLSレコードにパースする
 	 */
 	plaintextRecords, ciphertextRecords, err := utils.ParseRecords(buf[:n])
 	if err != nil {
 		panic(err)
 	}
 
-	// step5: ServerHelloへパース
+	/**
+	 * step5: ServerFlightから送られてくるTLSPlaintextから扱いやすいように、ServerHelloをパースする
+	 * ついでに、ServerHelloを含むHandshakeメッセージのバイト列も取得する
+	 */
+
 	serverHello, serverHelloMessage, err := utils.ParseTLS13ServerHelloAndMessage(plaintextRecords)
 	if err != nil {
 		panic(err)
@@ -67,39 +72,39 @@ func do_handshake(conn net.Conn) error {
 		panic(err)
 	}
 
-	// step7: サーバからの暗号化されたハンドシェイクメッセージを復号する
-	handshakeSecrets, err := key.DeriveTLS13ChaCha20HandshakeSecrets(sharedSecret, clientHelloRecord.Payload, serverHelloMessage)
+	// step7: 復号に必要なサーバHandshake鍵を導出する
+	serverHandshakeSecrets, err := key.DeriveTLS13ChaCha20HandshakeSecrets(sharedSecret, clientHelloRecord.Payload, serverHelloMessage)
 	if err != nil {
 		panic(err)
 	}
 
-	_, _, _, _, decryptedServerHandshakeRecords, err := utils.DecodeTLSCiphertextRecordsWithChaCha20Poly1305(
+	// step8: サーバの暗号化Handshakeレコードを復号し、Handshakeメッセージをパースする
+	_, _, _, serverFinished, serverHandshakePlaintextRecords, err := utils.DecodeAndParseServerTLS13HandshakeMessagesWithChaCha20Poly1305(
 		ciphertextRecords,
-		handshakeSecrets.ServerHandshakeKey,
-		handshakeSecrets.ServerHandshakeIV,
+		serverHandshakeSecrets.ServerHandshakeKey,
+		serverHandshakeSecrets.ServerHandshakeIV,
 		0,
 	)
 	if err != nil {
 		panic(err)
 	}
-
-	serverEncryptedHandshakeMessages, err := utils.ConcatHandshakeMessages(decryptedServerHandshakeRecords)
-	if err != nil {
-		panic(err)
+	if serverFinished == nil {
+		panic(utils.ErrServerFinishedNotFound)
 	}
 
-	sessionKeys, err := key.DeriveTLS13ChaCha20ClientSessionKeys(
+	// step9: ClientFinished と ApplicationData 通信用のセッション鍵を導出する
+	clientSessionKeys, err := key.DeriveTLS13ChaCha20ClientSessionKeys(
 		sharedSecret,
 		clientHelloRecord.Payload,
 		serverHelloMessage,
-		serverEncryptedHandshakeMessages,
+		serverHandshakePlaintextRecords,
 	)
 	if err != nil {
 		panic(err)
 	}
-	keyState = *sessionKeys
+	keyState = *clientSessionKeys
 
-	// step9: ClientFinished レコードを生成し、サーバに送信する
+	// step10: ClientFinished レコードを生成し、サーバに送信する
 	finishedRecord, err := utils.BuildClientFinishedRecord(&keyState, 0)
 	if err != nil {
 		panic(err)

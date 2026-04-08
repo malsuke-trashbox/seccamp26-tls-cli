@@ -5,7 +5,6 @@ import (
 	"os"
 
 	"github.com/malsuke/seccamp2026-tls13-cli/internal/key"
-	"github.com/malsuke/seccamp2026-tls13-cli/internal/messages/record/appdata"
 	"github.com/malsuke/seccamp2026-tls13-cli/internal/utils"
 )
 
@@ -24,9 +23,7 @@ func main() {
 	do_handshake(conn)
 
 	// Application Data の送受信
-	httpRequest := []byte("GET / HTTP/1.1\r\nHost: " + defaultServerName + "\r\nConnection: close\r\n\r\n")
-	applicationData := (&appdata.ApplicationData{Data: httpRequest}).Marshal()
-	applicationDataRecord, err := utils.BuildClientApplicationDataRecord(&keyState, 0, applicationData)
+	applicationDataRecord, err := BuildApplicationDataRecord(&keyState, 0)
 	if err != nil {
 		panic(err)
 	}

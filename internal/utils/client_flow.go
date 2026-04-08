@@ -113,7 +113,7 @@ func deriveServerEncryptedHandshakeMessages(
 		return nil, err
 	}
 
-	_, _, _, _, decryptedServerHandshakeRecords, err := DecodeTLSCiphertextRecordsWithChaCha20Poly1305(
+	_, _, _, _, decryptedServerHandshakeRecords, err := DecodeAndParseServerTLS13HandshakeMessagesWithChaCha20Poly1305(
 		ciphertextRecords,
 		handshakeSecrets.ServerHandshakeKey,
 		handshakeSecrets.ServerHandshakeIV,

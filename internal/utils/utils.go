@@ -152,7 +152,7 @@ func DecodeTLSCiphertextRecordsWithChaCha20Poly1305Raw(ciphertextRecords []recor
 	return DecodeTLSCiphertextRecordsWithAEAD(ciphertextRecords, aead, iv, initialSeq)
 }
 
-func DecodeTLSCiphertextRecordsWithChaCha20Poly1305(ciphertextRecords []record.TLSCiphertext, key []byte, iv []byte, initialSeq uint64) (*handshake.EncryptedExtensions, *handshake.Certificate, *handshake.CertificateVerify, *handshake.Finished, []record.TLSPlaintext, error) {
+func DecodeAndParseServerTLS13HandshakeMessagesWithChaCha20Poly1305(ciphertextRecords []record.TLSCiphertext, key []byte, iv []byte, initialSeq uint64) (*handshake.EncryptedExtensions, *handshake.Certificate, *handshake.CertificateVerify, *handshake.Finished, []record.TLSPlaintext, error) {
 	plaintextRecords, err := DecodeTLSCiphertextRecordsWithChaCha20Poly1305Raw(ciphertextRecords, key, iv, initialSeq)
 	if err != nil {
 		return nil, nil, nil, nil, nil, err
@@ -164,6 +164,10 @@ func DecodeTLSCiphertextRecordsWithChaCha20Poly1305(ciphertextRecords []record.T
 	}
 
 	return encryptedExtensions, certificate, certificateVerify, finished, plaintextRecords, nil
+}
+
+func DecodeTLSCiphertextRecordsWithChaCha20Poly1305(ciphertextRecords []record.TLSCiphertext, key []byte, iv []byte, initialSeq uint64) (*handshake.EncryptedExtensions, *handshake.Certificate, *handshake.CertificateVerify, *handshake.Finished, []record.TLSPlaintext, error) {
+	return DecodeAndParseServerTLS13HandshakeMessagesWithChaCha20Poly1305(ciphertextRecords, key, iv, initialSeq)
 }
 
 func ParseServerTLS13HandshakeMessages(records []record.TLSPlaintext) (*handshake.EncryptedExtensions, *handshake.Certificate, *handshake.CertificateVerify, *handshake.Finished, error) {

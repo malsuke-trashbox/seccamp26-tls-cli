@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/malsuke/seccamp2026-tls13-cli/internal/messages/record"
+	"github.com/malsuke/seccamp2026-tls13-cli/internal/protocol"
 	"golang.org/x/crypto/chacha20poly1305"
 	"golang.org/x/crypto/hkdf"
 )
@@ -208,7 +210,12 @@ func DeriveTLS13ChaCha20ServerHandshakeKeyIV(sharedSecret []byte, clientHello []
 	return cloneBytes(secrets.ServerHandshakeKey), cloneBytes(secrets.ServerHandshakeIV), nil
 }
 
-func DeriveTLS13ChaCha20ClientSessionKeys(sharedSecret []byte, clientHello []byte, serverHello []byte, serverEncryptedHandshakeMessages []byte) (*TLS13ChaCha20ClientSessionKeys, error) {
+func DeriveTLS13ChaCha20ClientSessionKeys(sharedSecret []byte, clientHello []byte, serverHello []byte, serverHandshakeRecords []record.TLSPlaintext) (*TLS13ChaCha20ClientSessionKeys, error) {
+	serverEncryptedHandshakeMessages, err := concatTLS13HandshakeMessages(serverHandshakeRecords)
+	if err != nil {
+		return nil, err
+	}
+
 	handshakeSecrets, err := DeriveTLS13ChaCha20HandshakeSecrets(sharedSecret, clientHello, serverHello)
 	if err != nil {
 		return nil, err
@@ -275,6 +282,71 @@ func DeriveTLS13ChaCha20ClientSessionKeys(sharedSecret []byte, clientHello []byt
 		ServerApplicationKey:              cloneBytes(serverApplicationKey),
 		ServerApplicationIV:               cloneBytes(serverApplicationIV),
 	}, nil
+}
+
+func concatTLS13HandshakeMessages(records []record.TLSPlaintext) ([]byte, error) {
+	messages, err := collectTLS13HandshakeMessages(records)
+	if err != nil {
+		return nil, err
+	}
+
+	totalLen := 0
+	for _, message := range messages {
+		totalLen += len(message)
+	}
+
+	result := make([]byte, 0, totalLen)
+	for _, message := range messages {
+		result = append(result, message...)
+	}
+
+	return result, nil
+}
+
+func collectTLS13HandshakeMessages(records []record.TLSPlaintext) ([][]byte, error) {
+	stream := make([]byte, 0)
+	messages := make([][]byte, 0)
+
+	for _, rec := range records {
+		if rec.Type != protocol.Handshake {
+			continue
+		}
+
+		stream = append(stream, rec.Payload...)
+
+		for len(stream) >= protocol.HandshakeHeaderLen {
+			msgLen := parseUint24(stream[1:protocol.HandshakeHeaderLen])
+			msgTotalLen := protocol.HandshakeHeaderLen + msgLen
+			if msgTotalLen <= protocol.HandshakeHeaderLen {
+				return nil, fmt.Errorf("tls: malformed handshake length %d", msgLen)
+			}
+
+			if len(stream) < msgTotalLen {
+				break
+			}
+
+			message := make([]byte, msgTotalLen)
+			copy(message, stream[:msgTotalLen])
+			messages = append(messages, message)
+			stream = stream[msgTotalLen:]
+		}
+	}
+
+	if len(stream) > 0 {
+		if len(stream) < protocol.HandshakeHeaderLen {
+			return nil, fmt.Errorf("tls: incomplete handshake header (have=%d)", len(stream))
+		}
+
+		msgLen := parseUint24(stream[1:protocol.HandshakeHeaderLen])
+		msgTotalLen := protocol.HandshakeHeaderLen + msgLen
+		return nil, fmt.Errorf("tls: incomplete handshake message (need=%d, have=%d)", msgTotalLen, len(stream))
+	}
+
+	return messages, nil
+}
+
+func parseUint24(data []byte) int {
+	return int(data[0])<<16 | int(data[1])<<8 | int(data[2])
 }
 
 func hkdfExtractSHA256(salt []byte, ikm []byte) []byte {

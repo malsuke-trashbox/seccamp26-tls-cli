@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"testing"
 
+	"github.com/malsuke/seccamp2026-tls13-cli/internal/messages/record"
+	"github.com/malsuke/seccamp2026-tls13-cli/internal/protocol"
 	"golang.org/x/crypto/chacha20poly1305"
 )
 
@@ -120,9 +122,25 @@ func TestDeriveTLS13ChaCha20ClientSessionKeys(t *testing.T) {
 	sharedSecret := bytes.Repeat([]byte{0x10}, X25519PublicKeyBytes)
 	clientHello := bytes.Repeat([]byte{0x20}, 64)
 	serverHello := bytes.Repeat([]byte{0x30}, 64)
-	serverEncryptedHandshakeMessages := bytes.Repeat([]byte{0x40}, 128)
+	serverFinishedBody := bytes.Repeat([]byte{0x40}, 32)
+	serverFinishedMessage := make([]byte, 0, protocol.HandshakeHeaderLen+len(serverFinishedBody))
+	serverFinishedMessage = append(serverFinishedMessage, byte(protocol.TypeFinished))
+	serverFinishedMessage = append(
+		serverFinishedMessage,
+		byte(len(serverFinishedBody)>>16),
+		byte(len(serverFinishedBody)>>8),
+		byte(len(serverFinishedBody)),
+	)
+	serverFinishedMessage = append(serverFinishedMessage, serverFinishedBody...)
 
-	sessionKeys, err := DeriveTLS13ChaCha20ClientSessionKeys(sharedSecret, clientHello, serverHello, serverEncryptedHandshakeMessages)
+	serverHandshakeRecords := []record.TLSPlaintext{{
+		Type:    protocol.Handshake,
+		Version: protocol.TLS_VERSION_1_2,
+		Length:  uint16(len(serverFinishedMessage)),
+		Payload: serverFinishedMessage,
+	}}
+
+	sessionKeys, err := DeriveTLS13ChaCha20ClientSessionKeys(sharedSecret, clientHello, serverHello, serverHandshakeRecords)
 	if err != nil {
 		t.Fatalf("DeriveTLS13ChaCha20ClientSessionKeys() failed: %v", err)
 	}
