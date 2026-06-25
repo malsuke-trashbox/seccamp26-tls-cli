@@ -3,6 +3,7 @@ package utils
 import (
 	"crypto/ecdh"
 	"errors"
+	"fmt"
 
 	"github.com/malsuke/seccamp2026-tls13-cli/internal/key"
 	"github.com/malsuke/seccamp2026-tls13-cli/internal/messages/record"
@@ -69,6 +70,42 @@ func DetectTLS13ServerFinishedAndConcatHandshakeMessages(
 	}
 
 	return allHandshakeMessages, serverFinished, nil
+}
+
+func BuildTLS13HandshakeTranscriptBeforeMessageType(
+	clientHelloMessage []byte,
+	serverHelloMessage []byte,
+	serverHandshakeRecords []record.TLSPlaintext,
+	stopType protocol.HandshakeType,
+) ([]byte, error) {
+	messages, err := CollectHandshakeMessages(serverHandshakeRecords)
+	if err != nil {
+		return nil, err
+	}
+
+	transcript := make([]byte, 0, len(clientHelloMessage)+len(serverHelloMessage))
+	transcript = append(transcript, clientHelloMessage...)
+	transcript = append(transcript, serverHelloMessage...)
+
+	foundStopMessage := false
+	for _, message := range messages {
+		if len(message) < protocol.HandshakeHeaderLen {
+			continue
+		}
+
+		if protocol.HandshakeType(message[0]) == stopType {
+			foundStopMessage = true
+			break
+		}
+
+		transcript = append(transcript, message...)
+	}
+
+	if !foundStopMessage {
+		return nil, fmt.Errorf("tls: handshake message %s not found", stopType)
+	}
+
+	return transcript, nil
 }
 
 func DeriveTLS13SharedSecretAndServerHelloMessage(

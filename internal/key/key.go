@@ -29,6 +29,10 @@ var (
 	ErrEmptySharedSecret      = errors.New("tls: shared secret is empty")
 	ErrEmptyClientHello       = errors.New("tls: client hello is empty")
 	ErrEmptyServerHello       = errors.New("tls: server hello is empty")
+	ErrEmptyServerTrafficSecret = errors.New("tls: server handshake traffic secret is empty")
+	ErrEmptyHandshakeTranscript = errors.New("tls: handshake transcript is empty")
+	ErrEmptyFinishedVerifyData  = errors.New("tls: finished verify data is empty")
+	ErrInvalidFinishedVerifyData = errors.New("tls: invalid finished verify data")
 	ErrInvalidHKDFLabelLength = errors.New("tls: hkdf label is too long")
 	ErrInvalidHKDFContextLen  = errors.New("tls: hkdf context is too long")
 )
@@ -208,6 +212,39 @@ func DeriveTLS13ChaCha20ServerHandshakeKeyIV(sharedSecret []byte, clientHello []
 	}
 
 	return cloneBytes(secrets.ServerHandshakeKey), cloneBytes(secrets.ServerHandshakeIV), nil
+}
+
+func VerifyTLS13ServerFinished(
+	serverHandshakeTrafficSecret []byte,
+	handshakeTranscript []byte,
+	finishedVerifyData []byte,
+) error {
+	if len(serverHandshakeTrafficSecret) == 0 {
+		return ErrEmptyServerTrafficSecret
+	}
+	if len(handshakeTranscript) == 0 {
+		return ErrEmptyHandshakeTranscript
+	}
+	if len(finishedVerifyData) == 0 {
+		return ErrEmptyFinishedVerifyData
+	}
+
+	transcriptHash := sha256.Sum256(handshakeTranscript)
+
+	serverFinishedKey, err := hkdfExpandLabelSHA256(serverHandshakeTrafficSecret, "finished", nil, TLS13HashLenSHA256)
+	if err != nil {
+		return err
+	}
+
+	verifyMAC := hmac.New(sha256.New, serverFinishedKey)
+	_, _ = verifyMAC.Write(transcriptHash[:])
+	expectedVerifyData := verifyMAC.Sum(nil)
+
+	if !hmac.Equal(expectedVerifyData, finishedVerifyData) {
+		return ErrInvalidFinishedVerifyData
+	}
+
+	return nil
 }
 
 func DeriveTLS13ChaCha20ClientSessionKeys(sharedSecret []byte, clientHello []byte, serverHello []byte, serverHandshakeRecords []record.TLSPlaintext) (*TLS13ChaCha20ClientSessionKeys, error) {

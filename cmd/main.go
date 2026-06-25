@@ -10,7 +10,7 @@ import (
 
 const defaultServerName = "www.example.com"
 
-var keyState key.TLS13ChaCha20ClientSessionKeys = key.TLS13ChaCha20ClientSessionKeys{}
+var keyState key.TLS13ChaCha20ClientSessionKeys
 
 func main() {
 	conn, err := (&net.Dialer{}).Dial("tcp", defaultServerName+":443")

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 
+	"github.com/malsuke/seccamp2026-tls13-cli/internal/cert"
 	"github.com/malsuke/seccamp2026-tls13-cli/internal/key"
 	"github.com/malsuke/seccamp2026-tls13-cli/internal/messages/record"
 	"github.com/malsuke/seccamp2026-tls13-cli/internal/messages/record/handshake"
@@ -79,7 +80,7 @@ func do_handshake(conn net.Conn) error {
 	}
 
 	// step8: サーバの暗号化Handshakeレコードを復号し、Handshakeメッセージをパースする
-	_, _, _, serverFinished, serverHandshakePlaintextRecords, err := utils.DecodeAndParseServerTLS13HandshakeMessagesWithChaCha20Poly1305(
+	_, serverCertificate, serverCertificateVerify, serverFinished, serverHandshakePlaintextRecords, err := utils.DecodeAndParseServerTLS13HandshakeMessagesWithChaCha20Poly1305(
 		ciphertextRecords,
 		serverHandshakeSecrets.ServerHandshakeKey,
 		serverHandshakeSecrets.ServerHandshakeIV,
@@ -88,11 +89,53 @@ func do_handshake(conn net.Conn) error {
 	if err != nil {
 		panic(err)
 	}
-	if serverFinished == nil {
-		panic(utils.ErrServerFinishedNotFound)
+
+	// step9: サーバ証明書チェーンを OS 非依存ルート証明書 (certifi) で検証する
+	leafCertificate, _, err := cert.VerifyServerCertificateChainWithCertifi(serverCertificate, defaultServerName)
+	if err != nil {
+		panic(err)
 	}
 
-	// step9: ClientFinished と ApplicationData 通信用のセッション鍵を導出する
+	// step10: CertificateVerify 署名を検証して、サーバ秘密鍵の正当性を確認する
+	transcriptBeforeCertificateVerify, err := utils.BuildTLS13HandshakeTranscriptBeforeMessageType(
+		clientHelloRecord.Payload,
+		serverHelloMessage,
+		serverHandshakePlaintextRecords,
+		protocol.TypeCertificateVerify,
+	)
+	if err != nil {
+		panic(err)
+	}
+
+	if err := cert.VerifyTLS13ServerCertificateVerify(
+		leafCertificate,
+		serverCertificateVerify.SignatureAlgorithm,
+		serverCertificateVerify.Signature,
+		transcriptBeforeCertificateVerify,
+	); err != nil {
+		panic(err)
+	}
+
+	// step11: Server Finished を検証して、復号したハンドシェイク完全性を確認する
+	transcriptBeforeServerFinished, err := utils.BuildTLS13HandshakeTranscriptBeforeMessageType(
+		clientHelloRecord.Payload,
+		serverHelloMessage,
+		serverHandshakePlaintextRecords,
+		protocol.TypeFinished,
+	)
+	if err != nil {
+		panic(err)
+	}
+
+	if err := key.VerifyTLS13ServerFinished(
+		serverHandshakeSecrets.ServerHandshakeTrafficSecret,
+		transcriptBeforeServerFinished,
+		serverFinished.VerifyData,
+	); err != nil {
+		panic(err)
+	}
+
+	// step12: ClientFinished と ApplicationData 通信用のセッション鍵を導出する
 	clientSessionKeys, err := key.DeriveTLS13ChaCha20ClientSessionKeys(
 		sharedSecret,
 		clientHelloRecord.Payload,
@@ -104,7 +147,7 @@ func do_handshake(conn net.Conn) error {
 	}
 	keyState = *clientSessionKeys
 
-	// step10: ClientFinished レコードを生成し、サーバに送信する
+	// step13: ClientFinished レコードを生成し、サーバに送信する
 	finishedRecord, err := utils.BuildClientFinishedRecord(&keyState, 0)
 	if err != nil {
 		panic(err)
