@@ -13,6 +13,43 @@ import (
 
 var ErrServerFinishedNotFound = errors.New("tls: server finished not found in records")
 
+// ServerHandshakeFlightComplete reports whether buf holds a complete TLS 1.3
+// server handshake flight: a ServerHello plus the encrypted records up to and
+// including the server Finished.
+//
+// It is intended as the isComplete predicate for ReadServerHandshakeFlight, so
+// it reports false (rather than returning an error) for any input that is not
+// yet a fully decryptable flight — incomplete records, a missing ServerHello, or
+// a Finished that has not arrived yet — letting the read loop fetch more bytes.
+func ServerHandshakeFlightComplete(buf []byte, privateKey *ecdh.PrivateKey, clientHelloPayload []byte) bool {
+	plaintextRecords, ciphertextRecords, err := ParseRecords(buf)
+	if err != nil {
+		return false
+	}
+
+	sharedSecret, serverHelloMessage, err := DeriveTLS13SharedSecretAndServerHelloMessage(privateKey, plaintextRecords)
+	if err != nil {
+		return false
+	}
+
+	handshakeSecrets, err := key.DeriveTLS13ChaCha20HandshakeSecrets(sharedSecret, clientHelloPayload, serverHelloMessage)
+	if err != nil {
+		return false
+	}
+
+	_, _, _, finished, _, err := DecodeAndParseServerTLS13HandshakeMessagesWithChaCha20Poly1305(
+		ciphertextRecords,
+		handshakeSecrets.ServerHandshakeKey,
+		handshakeSecrets.ServerHandshakeIV,
+		0,
+	)
+	if err != nil {
+		return false
+	}
+
+	return finished != nil
+}
+
 func ParseTLS13ServerHelloAndMessage(
 	plaintextRecords []record.TLSPlaintext,
 ) (handshake.ServerHello, []byte, error) {
