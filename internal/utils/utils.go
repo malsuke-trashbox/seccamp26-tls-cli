@@ -2,7 +2,6 @@ package utils
 
 import (
 	"crypto/cipher"
-	"crypto/rand"
 	"errors"
 	"fmt"
 
@@ -14,12 +13,6 @@ import (
 
 var ErrServerHelloNotFound = errors.New("tls: server hello not found in records")
 var ErrNilAEAD = errors.New("tls: aead is nil")
-
-func GenerateRandom32Bytes() [32]byte {
-	var random [32]byte
-	_, _ = rand.Read(random[:])
-	return random
-}
 
 func ParseRecords(data []byte) ([]record.TLSPlaintext, []record.TLSCiphertext, error) {
 	allRecords, err := record.ParseTLSPlaintextRecords(data)

@@ -14,6 +14,74 @@ import (
 
 const chacha20poly1305TagSize = 16
 
+const serverFlightReadTimeout = 10 * time.Second
+
+// ErrAlertReceived is returned when the peer sends a TLS alert record while we
+// are reading the server handshake flight.
+var ErrAlertReceived = errors.New("tls: alert record received")
+
+// ReadServerHandshakeFlight reads the server's first handshake flight from conn.
+//
+// A TLS 1.3 server flight (ServerHello + ChangeCipherSpec + the encrypted
+// EncryptedExtensions/Certificate/CertificateVerify/Finished) routinely exceeds
+// a single TCP segment — a certificate chain alone is several KB — so a single
+// conn.Read cannot be relied upon to deliver it whole. This function accumulates
+// bytes across reads until isComplete reports the flight has fully arrived, the
+// connection is closed, or the read deadline elapses.
+//
+// isComplete is invoked with all bytes received so far and must report true only
+// once the flight can be fully processed (e.g. the server Finished is present
+// and decryptable). It should return false — not panic — for partial input.
+func ReadServerHandshakeFlight(conn net.Conn, isComplete func(accumulated []byte) bool) ([]byte, error) {
+	if err := conn.SetReadDeadline(time.Now().Add(serverFlightReadTimeout)); err != nil {
+		return nil, err
+	}
+	defer func() {
+		_ = conn.SetReadDeadline(time.Time{})
+	}()
+
+	accumulated := make([]byte, 0, 8192)
+	buf := make([]byte, 8192)
+
+	for {
+		n, err := conn.Read(buf)
+		if n > 0 {
+			accumulated = append(accumulated, buf[:n]...)
+
+			records, _, parseErr := record.ParseTLSPlaintextRecordsWithRemainder(accumulated)
+			if parseErr != nil {
+				return nil, parseErr
+			}
+			for _, rec := range records {
+				if rec.Type == protocol.Alert {
+					return nil, ErrAlertReceived
+				}
+			}
+
+			if isComplete(accumulated) {
+				return accumulated, nil
+			}
+		}
+
+		if err == nil {
+			continue
+		}
+
+		// The server sends its whole flight in one burst and then waits for the
+		// client; a timeout or EOF after we already have data means the burst is
+		// over. Return what we have so the caller surfaces any real protocol
+		// error from processing instead of a bare I/O error.
+		if errors.Is(err, io.EOF) && len(accumulated) > 0 {
+			return accumulated, nil
+		}
+		var netErr net.Error
+		if errors.As(err, &netErr) && netErr.Timeout() && len(accumulated) > 0 {
+			return accumulated, nil
+		}
+		return nil, err
+	}
+}
+
 func ConcatHandshakeMessages(records []record.TLSPlaintext) ([]byte, error) {
 	messages, err := CollectHandshakeMessages(records)
 	if err != nil {
